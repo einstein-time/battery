@@ -1,0 +1,68 @@
+# Training Configuration for Battery Thermal Surrogate
+# ====================================================
+
+model:
+  type: pc_unet
+  in_channels: 9      # [T, mask_cell, mask_coolant, mask_insul, k, q, h, sdf_cell, sdf_coolant]
+  out_channels: 1     # delta_T prediction
+  base_features: 32
+  num_levels: 4
+  dropout_rate: 0.1
+
+training:
+  epochs: 200
+  batch_size: 16
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  seed: 42
+  grad_clip: 1.0
+  early_stopping_patience: 20
+
+  # 3-phase training strategy
+  phases:
+    pretrain_epochs: 50    # Phase 1: data-only
+    physics_epochs: 100    # Phase 2: physics-informed
+    finetune_epochs: 50    # Phase 3: consistency fine-tuning
+
+  scheduler:
+    type: cosine
+    T_max: 200
+    eta_min: 1.0e-6
+
+  # Mixed precision (only used on CUDA)
+  mixed_precision: true
+
+data:
+  data_path: data/raw/thermal_dataset.h5
+  grid_size: 128
+  dt: 0.001
+  total_time: 1.0
+  n_trajectories: 2000
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  num_workers: 4
+
+physics:
+  dx: 0.001
+  dy: 0.001
+  rho: 2500.0       # kg/m^3 (battery cell density)
+  cp: 700.0         # J/(kg*K) (specific heat)
+  k_range: [0.5, 5.0]     # W/(m*K) thermal conductivity
+  q_range: [1.0e+5, 5.0e+6]  # W/m^3 heat generation
+  h_range: [10.0, 500.0]  # W/(m^2*K) convection coefficient
+  T_amb: 298.15     # K (ambient temperature)
+
+loss:
+  lambda_data: 1.0
+  lambda_pde: 0.1
+  lambda_bc: 0.1
+  lambda_consistency: 0.05
+  use_gradnorm: true
+  gradnorm_alpha: 1.5
+
+output:
+  output_dir: outputs
+  checkpoint_dir: checkpoints
+  log_dir: logs
+  save_every: 10
