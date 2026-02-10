@@ -3,12 +3,12 @@
 
 data:
   output_path: data/raw/thermal_dataset.h5
-  n_trajectories: 2000
+  n_trajectories: 200   # Reduce for laptops; use 2000 on workstations
   n_steps: 200         # Time steps per trajectory (subsample from full solve)
-  grid_size: 128
+  grid_size: 64        # Use 128 on machines with 16+ GB RAM
   dt: 0.001            # seconds
   total_time: 1.0      # seconds
-  n_workers: 4         # Parallel generation workers
+  n_workers: 1         # Sequential; increase on machines with more RAM
 
 physics:
   dx: 0.001            # meters (grid spacing)
