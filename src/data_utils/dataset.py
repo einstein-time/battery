@@ -112,14 +112,30 @@ class ThermalDataset(Dataset):
         self.transform = transform
 
         # Open file once to read metadata and cache static fields.
-        # We keep the file handle open for lazy temperature reads.
-        self._h5_file: Optional[h5py.File] = None
-        self._h5_file = h5py.File(str(self.h5_path), "r")
+        # We do NOT keep the file handle open -- it will be reopened
+        # lazily in __getitem__ so that the dataset is picklable for
+        # multi-worker DataLoader.
+        with h5py.File(str(self.h5_path), "r") as h5f:
+            self._read_metadata(h5f, indices)
 
-        self._validate_datasets()
+    def _read_metadata(self, h5f: h5py.File, indices: Optional[Sequence[int]]) -> None:
+        """Read and cache metadata and static fields from the open HDF5 file.
+
+        Args:
+            h5f: Open HDF5 file handle.
+            indices: Trajectory indices for this split.
+        """
+        # Validate required datasets
+        required_datasets = ["temperature", "parameters", "masks", "sdf_cell", "sdf_coolant"]
+        for name in required_datasets:
+            if name not in h5f:
+                raise KeyError(
+                    f"Required dataset '{name}' not found in {self.h5_path}. "
+                    f"Available keys: {list(h5f.keys())}"
+                )
 
         # Read shapes
-        temp_dset = self._h5_file["temperature"]
+        temp_dset = h5f["temperature"]
         n_trajectories: int = temp_dset.shape[0]
         n_steps: int = temp_dset.shape[1]
         self._nx: int = temp_dset.shape[2]
@@ -131,23 +147,23 @@ class ThermalDataset(Dataset):
         else:
             self.trajectory_indices = np.arange(n_trajectories, dtype=np.int64)
 
-        # Number of usable transitions per trajectory: steps 0..n_steps-2 -> n_steps-2+1 = n_steps-1
+        # Number of usable transitions per trajectory
         self.n_steps_per_traj: int = n_steps - 1
         self.total_samples: int = len(self.trajectory_indices) * self.n_steps_per_traj
 
         # Cache static spatial fields (small: single 2-D arrays)
-        mask_raw = self._h5_file["masks"][:]  # (nx, ny) int8
+        mask_raw = h5f["masks"][:]  # (nx, ny) int8
         self._mask_cell = torch.from_numpy((mask_raw == self._MATERIAL_BATTERY).astype(np.float32))
         self._mask_coolant = torch.from_numpy((mask_raw == self._MATERIAL_COOLANT).astype(np.float32))
         self._mask_insulation = torch.from_numpy((mask_raw == self._MATERIAL_INSULATION).astype(np.float32))
-        self._sdf_cell = torch.from_numpy(self._h5_file["sdf_cell"][:].astype(np.float32))
-        self._sdf_coolant = torch.from_numpy(self._h5_file["sdf_coolant"][:].astype(np.float32))
+        self._sdf_cell = torch.from_numpy(h5f["sdf_cell"][:].astype(np.float32))
+        self._sdf_coolant = torch.from_numpy(h5f["sdf_coolant"][:].astype(np.float32))
 
         # Cache parameters (small: n_traj x 4)
-        self._parameters = self._h5_file["parameters"][:]  # (n_traj, 4) float32
+        self._parameters = h5f["parameters"][:]  # (n_traj, 4) float32
 
         # Read HDF5 attributes for physics constants
-        self._T_amb: float = float(self._h5_file.attrs.get("T_amb", 298.15))
+        self._T_amb: float = float(h5f.attrs.get("T_amb", 298.15))
 
         logger.info(
             "ThermalDataset [%s]: %d trajectories, %d steps/traj, "
@@ -203,18 +219,16 @@ class ThermalDataset(Dataset):
         traj_local, time_step = self._linear_to_traj_step(idx)
         traj_global = int(self.trajectory_indices[traj_local])
 
-        # Lazy read temperature for this trajectory at time t and t+1
-        # HDF5 fancy indexing: read only the two needed slices.
-        if self._h5_file is None:
-            self._h5_file = h5py.File(str(self.h5_path), "r")
-
-        temp_dset = self._h5_file["temperature"]
-        T_t = torch.from_numpy(
-            temp_dset[traj_global, time_step].astype(np.float32)
-        )  # (H, W)
-        T_next = torch.from_numpy(
-            temp_dset[traj_global, time_step + 1].astype(np.float32)
-        )  # (H, W)
+        # Read temperature lazily -- open and close per access so the
+        # dataset stays picklable for multi-worker DataLoaders.
+        with h5py.File(str(self.h5_path), "r") as h5f:
+            temp_dset = h5f["temperature"]
+            T_t = torch.from_numpy(
+                temp_dset[traj_global, time_step].astype(np.float32)
+            )  # (H, W)
+            T_next = torch.from_numpy(
+                temp_dset[traj_global, time_step + 1].astype(np.float32)
+            )  # (H, W)
 
         # Physical parameters for this trajectory: [k_cell, q0, h_conv, freq]
         params = self._parameters[traj_global]  # (4,)
@@ -262,34 +276,9 @@ class ThermalDataset(Dataset):
     # Cleanup
     # ------------------------------------------------------------------
 
-    def close(self) -> None:
-        """Close the underlying HDF5 file handle."""
-        if self._h5_file is not None:
-            self._h5_file.close()
-            self._h5_file = None
-
-    def __del__(self) -> None:
-        """Ensure HDF5 file is closed when the dataset is garbage-collected."""
-        self.close()
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _validate_datasets(self) -> None:
-        """Check that all required HDF5 datasets and attributes exist.
-
-        Raises:
-            KeyError: If a required dataset is missing.
-        """
-        required_datasets = ["temperature", "parameters", "masks", "sdf_cell", "sdf_coolant"]
-        assert self._h5_file is not None
-        for name in required_datasets:
-            if name not in self._h5_file:
-                raise KeyError(
-                    f"Required dataset '{name}' not found in {self.h5_path}. "
-                    f"Available keys: {list(self._h5_file.keys())}"
-                )
 
     def _linear_to_traj_step(self, idx: int) -> Tuple[int, int]:
         """Convert a flat sample index to a (trajectory_local, time_step) pair.
