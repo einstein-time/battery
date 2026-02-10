@@ -163,6 +163,8 @@ def apply_cli_overrides(config: Dict[str, Any], args: argparse.Namespace) -> Dic
     # Debug mode: tiny dataset and short run for quick smoke tests.
     if args.debug:
         config.setdefault("data", {})["n_trajectories"] = 100
+        config["data"]["grid_size"] = 32
+        config["data"]["data_path"] = "data/raw/quick_test.h5"
         config.setdefault("training", {})["epochs"] = 5
         config["training"].setdefault("phases", {})
         config["training"]["phases"]["pretrain_epochs"] = 2
@@ -171,7 +173,7 @@ def apply_cli_overrides(config: Dict[str, Any], args: argparse.Namespace) -> Dic
         config.setdefault("training", {})["batch_size"] = min(
             config.get("training", {}).get("batch_size", 16), 8
         )
-        logger.info("Debug mode enabled: 100 samples, 5 epochs, batch_size <= 8")
+        logger.info("Debug mode enabled: quick_test data, 5 epochs, batch_size <= 8")
 
     return config
 
@@ -450,6 +452,14 @@ def main() -> None:
     data_path = Path(data_path_str)
     if not data_path.is_absolute():
         data_path = PROJECT_ROOT / data_path
+
+    # In debug mode, auto-generate quick_test data if missing
+    if args.debug and not data_path.exists():
+        logger.info("Debug mode: data not found, generating quick test dataset...")
+        from src.data_utils.generator import DataGenerator
+        generator = DataGenerator(config)
+        generator.generate_quick_test(data_path)
+        logger.info("Quick test data generated at %s", data_path)
 
     try:
         logger.info("Loading data from %s ...", data_path)
