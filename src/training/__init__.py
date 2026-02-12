@@ -1,11 +1,9 @@
-"""Training modules including trainer, losses, and adaptive weighting."""
+"""Training utilities including losses, trainer, and GradNorm."""
 
-from src.training.trainer import Trainer
 from src.training.losses import PhysicsInformedLoss
-from src.training.gradnorm import GradNorm
+from src.training.trainer import Trainer
 
 __all__ = [
-    "Trainer",
     "PhysicsInformedLoss",
-    "GradNorm",
+    "Trainer",
 ]

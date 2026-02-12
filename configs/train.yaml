@@ -34,10 +34,10 @@ training:
 
 data:
   data_path: data/raw/thermal_dataset.h5
-  grid_size: 128
+  grid_size: 64
   dt: 0.001
   total_time: 1.0
-  n_trajectories: 2000
+  n_trajectories: 200
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
