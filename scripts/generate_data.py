@@ -1,136 +1,90 @@
-#!/usr/bin/env python3
-"""CLI script for generating thermal simulation training data.
-
-Generates trajectories of 2D heat equation solutions with randomized
-parameters and saves to compressed HDF5 format.
-
-Usage:
-    python scripts/generate_data.py --config configs/generate.yaml
-    python scripts/generate_data.py --quick_test
-    python scripts/generate_data.py --n_trajectories 100 --output data/small.h5
-"""
+#!/usr/bin/env python
+"""Generate synthetic thermal simulation dataset."""
 
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils.config import load_config, DEFAULTS
-from src.utils.logging import setup_logging
 from src.data_utils.generator import DataGenerator
+from src.utils.config import load_config, merge_configs
+from src.utils.logging import setup_logging
 
-logger = logging.getLogger("battery_surrogate")
 
-
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Parsed arguments namespace.
-    """
-    parser = argparse.ArgumentParser(
-        description="Generate thermal simulation training data",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+def main():
+    parser = argparse.ArgumentParser(description="Generate thermal simulation dataset")
     parser.add_argument(
         "--config",
-        type=str,
-        default="configs/generate.yaml",
-        help="Path to generation config file",
+        type=Path,
+        default=Path("configs/generate.yaml"),
+        help="Path to configuration file",
     )
     parser.add_argument(
         "--output",
-        type=str,
+        type=Path,
         default=None,
-        help="Override output HDF5 file path",
+        help="Override output path from config",
     )
     parser.add_argument(
         "--n_trajectories",
         type=int,
         default=None,
-        help="Override number of trajectories to generate",
-    )
-    parser.add_argument(
-        "--n_workers",
-        type=int,
-        default=None,
-        help="Number of parallel workers",
+        help="Override number of trajectories from config",
     )
     parser.add_argument(
         "--quick_test",
         action="store_true",
-        help="Generate small test dataset (10 trajectories, 50 steps, 32x32)",
+        help="Use quick test configuration (10 trajectories, 32x32 grid)",
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducibility",
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose logging",
     )
-    return parser.parse_args()
 
+    args = parser.parse_args()
 
-def main() -> None:
-    """Main entry point for data generation."""
-    args = parse_args()
+    # Setup logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    setup_logging(level=log_level, verbose=args.verbose)
 
-    setup_logging(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.info("=" * 60)
+    logger.info("THERMAL DATA GENERATION")
+    logger.info("=" * 60)
 
-    config_path = Path(args.config)
-    if config_path.exists():
-        config = load_config(config_path)
-    else:
-        logger.warning("Config file not found: %s, using defaults", config_path)
-        config = DEFAULTS.copy()
+    # Load configuration
+    config = load_config(args.config)
 
+    # Apply quick test overrides
     if args.quick_test:
-        config["data"]["n_trajectories"] = 10
-        config["data"]["n_steps"] = 50
-        config["data"]["grid_size"] = 32
-        output_path = Path("data/raw/quick_test.h5")
-        logger.info("Quick test mode: 10 trajectories, 50 steps, 32x32 grid")
-    else:
-        output_path = Path(config["data"].get("output_path", "data/raw/thermal_dataset.h5"))
+        logger.info("Using quick test configuration")
+        quick_config = config.get("quick_test", {})
+        config["data"]["n_trajectories"] = quick_config.get("n_trajectories", 10)
+        config["data"]["n_steps"] = quick_config.get("n_steps", 50)
+        config["data"]["grid_size"] = quick_config.get("grid_size", 32)
 
+    # Apply command-line overrides
     if args.output:
-        output_path = Path(args.output)
+        config["data"]["output_path"] = str(args.output)
+
     if args.n_trajectories:
         config["data"]["n_trajectories"] = args.n_trajectories
-    if args.n_workers:
-        config["data"]["n_workers"] = args.n_workers
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    logger.info("=" * 60)
-    logger.info("Battery Thermal Data Generation")
-    logger.info("=" * 60)
-    logger.info("Trajectories:  %d", config["data"]["n_trajectories"])
-    logger.info("Grid size:     %d", config["data"].get("grid_size", 128))
-    logger.info("Output:        %s", output_path)
-    logger.info("=" * 60)
-
+    # Create generator
     generator = DataGenerator(config)
 
-    start_time = time.time()
-
-    if args.quick_test:
-        generator.generate_quick_test(output_path)
-    else:
-        n_workers = config["data"].get("n_workers", 4)
-        generator.generate_dataset(
-            n_trajectories=config["data"]["n_trajectories"],
-            output_path=output_path,
-            n_workers=n_workers,
-        )
-
-    elapsed = time.time() - start_time
-    logger.info("Data generation complete in %.1f seconds", elapsed)
-    logger.info("Saved to: %s", output_path)
+    # Generate dataset
+    try:
+        generator.generate_dataset()
+        logger.info("Data generation completed successfully!")
+    except Exception as e:
+        logger.error(f"Data generation failed: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,1 +1,3 @@
-"""Battery Thermal Surrogate: Physics-Informed ML for 2D Battery Thermal Management."""
+"""Battery Thermal Surrogate Package."""
+
+__version__ = "0.1.0"

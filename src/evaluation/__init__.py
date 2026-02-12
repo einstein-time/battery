@@ -1,17 +1,13 @@
-"""Evaluation and visualization modules."""
+"""Evaluation and visualization utilities."""
 
 from src.evaluation.visualization import (
-    TemperatureFieldVisualizer,
-    ErrorAnalysisVisualizer,
-    PhysicsValidationVisualizer,
-    UncertaintyVisualizer,
-    TrainingMonitor,
+    plot_temperature_comparison,
+    plot_error_map,
+    plot_training_curves,
 )
 
 __all__ = [
-    "TemperatureFieldVisualizer",
-    "ErrorAnalysisVisualizer",
-    "PhysicsValidationVisualizer",
-    "UncertaintyVisualizer",
-    "TrainingMonitor",
+    "plot_temperature_comparison",
+    "plot_error_map",
+    "plot_training_curves",
 ]
